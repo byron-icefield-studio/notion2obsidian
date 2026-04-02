@@ -20,8 +20,19 @@ export default function Layout() {
   } = useStore();
 
   const abortRef = useRef<AbortController | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
 
-  const canStart = token && vaultPath && selectedItems.size > 0 && !isMigrating;
+  const selectedCount = Object.keys(selectedItems).length;
+  const canStart = Boolean(token && vaultPath && selectedCount > 0 && !isMigrating);
+
+  /**
+   * 清理当前迁移会话引用，避免取消操作落到旧 session
+   * Clear active migration session refs to avoid cancelling stale sessions
+   */
+  const resetMigrationSession = () => {
+    sessionIdRef.current = null;
+    abortRef.current = null;
+  };
 
   const handleStartMigration = () => {
     if (!canStart) return;
@@ -29,11 +40,14 @@ export default function Layout() {
     clearMigrationEvents();
     setIsMigrating(true);
 
-    const items = Array.from(selectedItems.values());
+    const items = Object.values(selectedItems);
+    const sessionId = crypto.randomUUID();
+    sessionIdRef.current = sessionId;
 
     abortRef.current = startMigration(
       token,
       vaultPath,
+      sessionId,
       items,
       config,
       (event: MigrationEvent) => {
@@ -47,18 +61,22 @@ export default function Layout() {
         }
         if (event.type === 'done' || event.type === 'error' || event.type === 'cancelled') {
           setIsMigrating(false);
+          resetMigrationSession();
         }
       },
       (error: string) => {
         addMigrationEvent({ type: 'error', message: error });
         setIsMigrating(false);
+        resetMigrationSession();
       },
     );
   };
 
   const handleCancel = async () => {
     try {
-      await cancelMigration();
+      if (sessionIdRef.current) {
+        await cancelMigration(sessionIdRef.current);
+      }
       abortRef.current?.abort();
     } catch { /* ignore */ }
   };
@@ -98,14 +116,14 @@ export default function Layout() {
           <MigrationConfig />
 
           {/* Start button */}
-          {selectedItems.size > 0 && !isMigrating && (
+          {selectedCount > 0 && !isMigrating && (
             <button
               className="btn btn-primary start-migration-btn"
               disabled={!canStart}
               onClick={handleStartMigration}
             >
               <Rocket size={18} />
-              开始迁移 ({selectedItems.size} 项)
+              开始迁移 ({selectedCount} 项)
             </button>
           )}
 

@@ -39,7 +39,7 @@ export default function MigrationConfig() {
   const [showImageDirPicker, setShowImageDirPicker] = useState(false);
   const [activeVarGroup, setActiveVarGroup] = useState<'path' | 'template'>('path');
 
-  const selectedCount = selectedItems.size;
+  const selectedCount = Object.keys(selectedItems).length;
 
   if (selectedCount === 0) {
     return (

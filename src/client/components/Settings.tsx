@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Settings as SettingsIcon, Eye, EyeOff, X, Zap, FolderOpen, AlertCircle } from 'lucide-react';
 import { useStore } from '../store';
 import { searchNotion } from '../services/api';
+import type { NotionItem } from '../types';
 import DirectoryPicker from './DirectoryPicker';
 
 export default function Settings() {
@@ -9,7 +10,7 @@ export default function Settings() {
     token, setToken,
     vaultPath, setVaultPath,
     showSettings, setShowSettings,
-    setNotionItems, setIsLoading, setError, setDatabaseSchemas,
+    setNotionItems, setIsLoading, setError, clearDatabaseSchemas,
   } = useStore();
 
   const [showToken, setShowToken] = useState(false);
@@ -18,33 +19,59 @@ export default function Settings() {
   const [showDirPicker, setShowDirPicker] = useState(false);
   const [localToken, setLocalToken] = useState(token);
   const [localVaultPath, setLocalVaultPath] = useState(vaultPath);
+  const [testedItems, setTestedItems] = useState<NotionItem[] | null>(null);
+
+  /**
+   * 统一加载 Notion 数据，供“测试连接”和“保存设置”复用
+   * Shared Notion loader reused by both test connection and save actions
+   */
+  const loadNotionItems = async (nextToken: string): Promise<NotionItem[]> => {
+    return searchNotion(nextToken);
+  };
 
   const handleTestConnection = async () => {
     if (!localToken.trim()) {
       setTestResult({ ok: false, message: '请输入 Notion Token' });
+      setTestedItems(null);
       return;
     }
     setTesting(true);
     setTestResult(null);
     try {
-      const items = await searchNotion(localToken);
+      const items = await loadNotionItems(localToken);
+      setTestedItems(items);
       setTestResult({ ok: true, message: `连接成功！发现 ${items.length} 个项目` });
     } catch (err: any) {
+      setTestedItems(null);
       setTestResult({ ok: false, message: err.message || '连接失败' });
     } finally {
       setTesting(false);
     }
   };
 
+  /**
+   * 保存设置：复用测试连接的结果，避免重复请求
+   * Save settings: reuse test result to avoid duplicate Notion API calls
+   */
   const handleSave = async () => {
+    const normalizedToken = localToken.trim();
+    const tokenChanged = normalizedToken !== token;
+
     setToken(localToken);
     setVaultPath(localVaultPath);
 
-    if (localToken.trim()) {
+    if (normalizedToken) {
       setIsLoading(true);
       setError(null);
       try {
-        const items = await searchNotion(localToken);
+        const items = testResult?.ok && !tokenChanged && testedItems
+          ? testedItems
+          : await loadNotionItems(normalizedToken);
+        if (tokenChanged) {
+          // Token 切换后清空数据库结构缓存，避免旧工作区 schema 污染
+          // Clear cached schemas after token change to avoid stale workspace data
+          clearDatabaseSchemas();
+        }
         setNotionItems(items);
       } catch (err: any) {
         setError(err.message || '获取数据失败');
@@ -78,7 +105,11 @@ export default function Settings() {
               <input
                 type={showToken ? 'text' : 'password'}
                 value={localToken}
-                onChange={e => { setLocalToken(e.target.value); setTestResult(null); }}
+                onChange={e => {
+                  setLocalToken(e.target.value);
+                  setTestResult(null);
+                  setTestedItems(null);
+                }}
                 placeholder="ntn_xxxxxxxxxxxxxxxxxxxxx"
                 style={{ paddingRight: 40 }}
               />

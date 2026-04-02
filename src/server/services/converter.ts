@@ -38,7 +38,11 @@ export async function convertPage(
 
   const mdBlocks = await n2m.pageToMarkdown(pageData.id);
   const mdResult = n2m.toMarkdownString(mdBlocks);
-  let markdownBody = typeof mdResult === 'string' ? mdResult : mdResult.parent;
+  /**
+   * notion-to-md 在部分页面上可能返回不含 parent 的结果对象
+   * Some notion-to-md responses may omit parent for certain pages
+   */
+  let markdownBody = typeof mdResult === 'string' ? mdResult : (mdResult.parent ?? '');
 
   // 2. Collect images from markdown and replace with Obsidian embeds
   const images: ImageRef[] = [];
@@ -68,7 +72,7 @@ export async function convertPage(
   const vars = buildTemplateVars(pageData, markdownBody);
 
   // 4. Render MD template
-  const content = renderTemplate(config.mdTemplate, vars);
+  const content = normalizeMarkdownOutput(renderTemplate(config.mdTemplate, vars));
 
   // 5. Compute target path
   const relativePath = renderTemplate(config.pathTemplate, vars)
@@ -278,6 +282,27 @@ function renderTemplate(template: string, vars: Record<string, string>): string 
   });
 
   return result;
+}
+
+/**
+ * 统一清理 Markdown 输出中的无用空白，避免正文首尾和行尾出现脏空格
+ * Normalize Markdown output by removing useless leading/trailing whitespace and trailing line spaces
+ */
+function normalizeMarkdownOutput(content: string): string {
+  const normalizedLines = content
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''));
+
+  while (normalizedLines.length > 0 && normalizedLines[0].trim() === '') {
+    normalizedLines.shift();
+  }
+
+  while (normalizedLines.length > 0 && normalizedLines[normalizedLines.length - 1].trim() === '') {
+    normalizedLines.pop();
+  }
+
+  return normalizedLines.join('\n') + '\n';
 }
 
 function guessExtension(url: string): string {

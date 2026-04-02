@@ -1,4 +1,5 @@
 import { Client } from '@notionhq/client';
+import { APIResponseError } from '@notionhq/client';
 import type {
   SearchResponse,
   GetDatabaseResponse,
@@ -6,6 +7,34 @@ import type {
   BlockObjectResponse,
   PageObjectResponse,
 } from '@notionhq/client/build/src/api-endpoints.js';
+
+/**
+ * 指数退避重试 Notion API 调用，自动处理 429 限流
+ * Retry Notion API calls with exponential backoff, handles 429 rate limiting
+ */
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      lastError = err;
+      // 429 限流：遵守 Retry-After 或指数退避 / Rate limited: honor Retry-After or use exponential backoff
+      if (err instanceof APIResponseError && err.status === 429) {
+        const retryAfter = Number((err as any).headers?.['retry-after'] ?? 0);
+        const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * 2 ** attempt, 30_000);
+        await sleep(delay);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 export interface NotionItem {
   id: string;
@@ -64,10 +93,10 @@ export async function search(token: string): Promise<NotionItem[]> {
   let cursor: string | undefined = undefined;
 
   do {
-    const response: SearchResponse = await notion.search({
+    const response: SearchResponse = await withRetry(() => notion.search({
       start_cursor: cursor,
       page_size: 100,
-    });
+    }));
 
     for (const result of response.results) {
       if (result.object === 'database') {
@@ -102,7 +131,7 @@ export async function search(token: string): Promise<NotionItem[]> {
 
 export async function getDatabase(token: string, databaseId: string): Promise<DatabaseSchema> {
   const notion = createClient(token);
-  const db: GetDatabaseResponse = await notion.databases.retrieve({ database_id: databaseId });
+  const db: GetDatabaseResponse = await withRetry(() => notion.databases.retrieve({ database_id: databaseId }));
 
   const properties: Record<string, { id: string; name: string; type: string }> = {};
   for (const [name, prop] of Object.entries((db as any).properties)) {
@@ -128,11 +157,11 @@ export async function queryDatabaseEntries(token: string, databaseId: string): P
   const db = await getDatabase(token, databaseId);
 
   do {
-    const response: QueryDatabaseResponse = await notion.databases.query({
+    const response: QueryDatabaseResponse = await withRetry(() => notion.databases.query({
       database_id: databaseId,
       start_cursor: cursor,
       page_size: 100,
-    });
+    }));
 
     for (const page of response.results) {
       if (page.object === 'page') {
@@ -158,7 +187,7 @@ export async function queryDatabaseEntries(token: string, databaseId: string): P
 
 export async function getPage(token: string, pageId: string): Promise<PageData> {
   const notion = createClient(token);
-  const page = await notion.pages.retrieve({ page_id: pageId }) as PageObjectResponse;
+  const page = await withRetry(() => notion.pages.retrieve({ page_id: pageId })) as PageObjectResponse;
 
   let parentDatabaseId: string | undefined;
   let parentDatabaseName: string | undefined;
@@ -189,11 +218,11 @@ export async function getPageBlocks(token: string, pageId: string): Promise<Bloc
   async function fetchChildren(blockId: string) {
     let cursor: string | undefined = undefined;
     do {
-      const response = await notion.blocks.children.list({
+      const response = await withRetry(() => notion.blocks.children.list({
         block_id: blockId,
         start_cursor: cursor,
         page_size: 100,
-      });
+      }));
 
       for (const block of response.results) {
         const b = block as BlockObjectResponse;

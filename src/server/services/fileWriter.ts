@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import https from 'https';
 import http from 'http';
+import type { ClientRequest } from 'http';
 import type { ConvertedPage, MigrationConfig } from './converter.js';
 
 /**
@@ -20,7 +21,8 @@ export async function writePage(
   // If file already exists, append date to filename
   mdFilePath = await deduplicateFilePath(mdFilePath);
 
-  await fs.writeFile(mdFilePath, page.content, 'utf-8');
+  const normalizedContent = normalizeWrittenMarkdown(page.content);
+  await fs.writeFile(mdFilePath, normalizedContent, 'utf-8');
 
   // 2. Download and save images
   if (page.images.length > 0) {
@@ -86,30 +88,60 @@ function resolveImageDir(
 }
 
 /**
- * Download a file from a URL to a local path
+ * 写入前的最终 Markdown 清理，兜底去除行尾空格和文件尾部纯空白行
+ * Final Markdown cleanup before writing, removing trailing spaces and blank-only tail lines
+ */
+function normalizeWrittenMarkdown(content: string): string {
+  const lines = content
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''));
+
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop();
+  }
+
+  return lines.join('\n') + '\n';
+}
+
+/** 图片下载超时（毫秒）/ Image download timeout in ms */
+const DOWNLOAD_TIMEOUT_MS = 15_000;
+
+/**
+ * 实际执行 HTTP(S) 下载，支持最多 5 次重定向
+ * Perform the actual HTTP(S) download with up to 5 redirects and hard request timeout
  */
 function downloadFile(url: string, destPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const protocol = url.startsWith('https') ? https : http;
+    let settled = false;
+
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      callback();
+    };
 
     const makeRequest = (requestUrl: string, redirectCount: number = 0) => {
       if (redirectCount > 5) {
-        reject(new Error('Too many redirects'));
+        settle(() => reject(new Error('Too many redirects')));
         return;
       }
 
-      protocol.get(requestUrl, (response) => {
+      const protocol = requestUrl.startsWith('https') ? https : http;
+      const request: ClientRequest = protocol.get(requestUrl, (response) => {
         // Handle redirects
         if (response.statusCode && [301, 302, 303, 307, 308].includes(response.statusCode)) {
           const location = response.headers.location;
           if (location) {
+            response.resume();
             makeRequest(location, redirectCount + 1);
             return;
           }
         }
 
         if (response.statusCode !== 200) {
-          reject(new Error(`HTTP ${response.statusCode}`));
+          response.resume();
+          settle(() => reject(new Error(`HTTP ${response.statusCode}`)));
           return;
         }
 
@@ -118,13 +150,19 @@ function downloadFile(url: string, destPath: string): Promise<void> {
         response.on('end', async () => {
           try {
             await fs.writeFile(destPath, Buffer.concat(chunks));
-            resolve();
+            settle(resolve);
           } catch (err) {
-            reject(err);
+            settle(() => reject(err));
           }
         });
-        response.on('error', reject);
-      }).on('error', reject);
+        response.on('error', (err) => settle(() => reject(err)));
+      });
+
+      request.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+        request.destroy(new Error(`下载超时 (${DOWNLOAD_TIMEOUT_MS / 1000}s): ${requestUrl}`));
+      });
+
+      request.on('error', (err) => settle(() => reject(err)));
     };
 
     makeRequest(url);

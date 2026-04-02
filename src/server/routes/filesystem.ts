@@ -5,6 +5,12 @@ import os from 'os';
 
 const router = Router();
 
+/** 安全边界：只允许访问用户主目录及其子目录 / Security boundary: restrict access to home directory subtree */
+function isSafePath(resolvedPath: string): boolean {
+  const home = os.homedir();
+  return resolvedPath === home || resolvedPath.startsWith(home + path.sep);
+}
+
 // Get home directory
 router.get('/home', (_req, res) => {
   res.json({ path: os.homedir() });
@@ -15,6 +21,11 @@ router.get('/list', async (req, res) => {
   try {
     const dirPath = (req.query.path as string) || os.homedir();
     const resolvedPath = path.resolve(dirPath);
+
+    // 防止路径遍历攻击 / Prevent path traversal attacks
+    if (!isSafePath(resolvedPath)) {
+      return res.status(403).json({ error: '无权访问该目录' });
+    }
 
     const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
     const dirs = entries

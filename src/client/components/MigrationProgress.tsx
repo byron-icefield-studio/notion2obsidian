@@ -82,19 +82,31 @@ export default function MigrationProgress() {
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {event.title}
             </span>
-            {event.status === 'success' && event.path && (
+            {event.status === 'success' && (
               <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', flexShrink: 0 }}>
                 {event.path}
               </span>
             )}
-            {event.status === 'success' && event.imageCount && event.imageCount > 0 && (
+            {event.status === 'success' && event.imageCount > 0 && (
               <span className="badge badge-purple" style={{ flexShrink: 0 }}>
                 🖼 {event.imageCount}
               </span>
             )}
-            {event.status === 'failed' && event.error && (
-              <span style={{ color: 'var(--error)', fontSize: '0.75rem', flexShrink: 0 }} title={event.error}>
-                {event.error.substring(0, 30)}
+            {event.status === 'failed' && (
+              /* 用 CSS overflow + title 展示完整错误，不再硬截断 / Show full error via title, no hard substring cut */
+              <span
+                style={{
+                  color: 'var(--error)',
+                  fontSize: '0.75rem',
+                  flexShrink: 0,
+                  maxWidth: 200,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={event.error}
+              >
+                {event.error}
               </span>
             )}
           </div>

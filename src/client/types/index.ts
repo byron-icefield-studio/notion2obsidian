@@ -37,18 +37,19 @@ export interface MigrationItem {
   title: string;
 }
 
-export interface MigrationEvent {
-  type: 'status' | 'total' | 'progress' | 'page_done' | 'done' | 'cancelled' | 'error';
-  message?: string;
-  current?: number;
-  total?: number;
-  title?: string;
-  status?: 'success' | 'failed';
-  path?: string;
-  error?: string;
-  imageCount?: number;
-  summary?: { total: number; success: number; failed: number };
-}
+/**
+ * 迁移过程中的 SSE 事件，使用 discriminated union 确保各 type 字段的精确类型约束
+ * SSE events during migration, discriminated union enforces precise types per event kind
+ */
+export type MigrationEvent =
+  | { type: 'status'; message: string }
+  | { type: 'total'; total: number }
+  | { type: 'progress'; current: number; total: number; title: string; message: string }
+  | { type: 'page_done'; current: number; total: number; title: string; status: 'success'; path: string; imageCount: number }
+  | { type: 'page_done'; current: number; total: number; title: string; status: 'failed'; error: string }
+  | { type: 'done'; message: string; summary: { total: number; success: number; failed: number } }
+  | { type: 'error'; message: string }
+  | { type: 'cancelled'; message: string };
 
 export interface DirEntry {
   name: string;

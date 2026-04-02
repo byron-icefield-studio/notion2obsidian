@@ -70,7 +70,7 @@ export default function NotionBrowser() {
     }
   }, [token, databaseSchemas, setDatabaseSchema]);
 
-  const isSelected = (id: string) => selectedItems.has(id);
+  const isSelected = (id: string) => id in selectedItems;
 
   const handleToggleItem = (item: { id: string; type: 'database' | 'page'; title: string }) => {
     toggleItem(item);
@@ -82,7 +82,7 @@ export default function NotionBrowser() {
     handleToggleItem(dbItem);
   };
 
-  const selectedCount = selectedItems.size;
+  const selectedCount = Object.keys(selectedItems).length;
 
   if (!token) {
     return (
