@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server/index.ts",
+    "scan:daily-review-images": "npm run build:server && node dist/server/scripts/scanDailyReviewImages.js",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
